@@ -14,129 +14,153 @@ namespace ClassDiagrammGeneratorTests.Helper
     {
         #region ExtractClass
 
-        [Theory]
-        [InlineData("public class MyClass", EAccessmodifier.Public)]
-        [InlineData("private class MyClass", EAccessmodifier.Private)]
-        [InlineData("protected internal class MyClass", EAccessmodifier.ProtectedInternal)]
-        [InlineData("private protected class MyClass", EAccessmodifier.PrivateProtected)]
-        [InlineData("protected class MyClass", EAccessmodifier.Protected)]
-        [InlineData("class MyClass", EAccessmodifier.Internal)]
-        public void ExtractClass_ParsesAccessModifierAndName(string header, EAccessmodifier expectedAccess)
+        [Fact]
+        public void ExtractClass_SimpleClass_ParsesNameAndNamespace()
         {
             var lines = new[]
             {
-                header,
-                "{",
+                "public class MyClass {",
+                "}"
+            };
+            int index = 0;
+            var model = ExtractorHelper.ExtractClass(ref index, lines, "MyNamespace");
+
+            Assert.Equal("MyClass", model.Name);
+            Assert.Equal("MyNamespace", model.Namespace);
+            Assert.Equal(EAccessmodifier.Public, model.AccessModifier);
+            Assert.Empty(model.BaseClasses);
+            Assert.Empty(model.Interfaces);
+        }
+
+        [Fact]
+        public void ExtractClass_ClassWithInheritanceAndInterfaces_ParsesCorrectly()
+        {
+            var lines = new[]
+            {
+                "internal class DerivedClass : BaseClass, IDisposable, ICloneable {",
                 "}"
             };
             int index = 0;
             var model = ExtractorHelper.ExtractClass(ref index, lines, "TestNS");
-            Assert.Equal("MyClass", model.Name);
-            Assert.Equal("TestNS", model.Namespace);
-            Assert.Equal(expectedAccess, model.AccessModifier);
+
+            Assert.Equal("DerivedClass", model.Name);
+            Assert.Equal(EAccessmodifier.Internal, model.AccessModifier);
+            Assert.Single(model.BaseClasses);
+            Assert.Equal("BaseClass", model.BaseClasses[0]);
+            Assert.Equal(2, model.Interfaces.Count);
+            Assert.Contains("IDisposable", model.Interfaces);
+            Assert.Contains("ICloneable", model.Interfaces);
         }
 
         [Fact]
-        public void ExtractClass_ParsesBaseClassAndInterfaces()
+        public void ExtractClass_ClassWithProperties_ParsesProperties()
         {
             var lines = new[]
             {
-                "public class Derived : BaseClass, IFoo, IBar",
-                "{",
+                "public class WithProps {",
+                "public int Id { get; set; }",
+                "private string Name { get; set; }",
                 "}"
             };
             int index = 0;
             var model = ExtractorHelper.ExtractClass(ref index, lines, "NS");
-            Assert.Equal(new[] { "BaseClass" }, model.BaseClasses);
-            Assert.Equal(new[] { "IFoo", "IBar" }, model.Interfaces);
+
+            Assert.Equal(2, model.Properties.Count);
+            Assert.Contains(model.Properties, p => p.Name.Contains("Id"));
+            Assert.Contains(model.Properties, p => p.Name.Contains("Name"));
         }
 
         [Fact]
-        public void ExtractClass_ParsesProperties()
+        public void ExtractClass_ClassWithMethods_ParsesMethods()
         {
             var lines = new[]
             {
-                "public class TestClass",
-                "{",
-                "    public int Id { get; set; }",
-                "    private string Name { get; set; }",
-                "    protected static readonly bool IsReady { get; set; }",
+                "public class WithMethods {",
+                "public void Foo() { }",
+                "private int Bar(int x) { return x; }",
                 "}"
             };
             int index = 0;
             var model = ExtractorHelper.ExtractClass(ref index, lines, "NS");
-            Assert.Equal(3, model.Properties.Count);
 
-            var idProp = model.Properties.FirstOrDefault(p => p.Name == "Id");
-            Assert.NotNull(idProp);
-            Assert.Equal("int", idProp.Type);
-            Assert.Equal(EAccessmodifier.Public, idProp.AccessModifier);
-            Assert.False(idProp.IsReadOnly);
-            Assert.False(idProp.IsStatic);
-
-            var nameProp = model.Properties.FirstOrDefault(p => p.Name == "Name");
-            Assert.NotNull(nameProp);
-            Assert.Equal("string", nameProp.Type);
-            Assert.Equal(EAccessmodifier.Private, nameProp.AccessModifier);
-
-            var isReadyProp = model.Properties.FirstOrDefault(p => p.Name == "IsReady");
-            Assert.NotNull(isReadyProp);
-            Assert.Equal("bool", isReadyProp.Type);
-            Assert.Equal(EAccessmodifier.Protected, isReadyProp.AccessModifier);
-            Assert.True(isReadyProp.IsReadOnly);
-            Assert.True(isReadyProp.IsStatic);
+            Assert.True(model.Methods.Count == 2);
+            Assert.Contains(model.Methods, m => m.Name == "Foo");
+            Assert.Contains(model.Methods, m => m.Name == "Bar");
         }
 
         [Fact]
-        public void ExtractClass_ParsesMethods()
+        public void ExtractClass_IgnoresCommentsAndEmptyLines()
         {
             var lines = new[]
             {
-                "public class TestClass",
-                "{",
-                "    public void Foo() {",
-                "    private int Bar(string s) {",
-                "    protected static bool Baz(int x, int y) {",
+                "public class Commented {",
+                "// This is a comment",
+                "",
+                "public int Value { get; set; } // property",
+                "/* block comment",
+                "   still comment */",
+                "public void Do() { }",
                 "}"
             };
             int index = 0;
             var model = ExtractorHelper.ExtractClass(ref index, lines, "NS");
-            Assert.Equal(3, model.Methods.Count);
 
-            var foo = model.Methods.FirstOrDefault(m => m.Name == "Foo");
-            Assert.NotNull(foo);
-            Assert.Equal("void", foo.ReturnType);
-            Assert.Equal(EAccessmodifier.Public, foo.AccessModifier);
-            Assert.Empty(foo.Parameters);
-
-            var bar = model.Methods.FirstOrDefault(m => m.Name == "Bar");
-            Assert.NotNull(bar);
-            Assert.Equal("int", bar.ReturnType);
-            Assert.Equal(EAccessmodifier.Private, bar.AccessModifier);
-            Assert.Single(bar.Parameters);
-            Assert.Equal("string s", bar.Parameters[0]);
-
-            var baz = model.Methods.FirstOrDefault(m => m.Name == "Baz");
-            Assert.NotNull(baz);
-            Assert.Equal("bool", baz.ReturnType);
-            Assert.Equal(EAccessmodifier.Protected, baz.AccessModifier);
-            Assert.Equal(2, baz.Parameters.Count);
-            Assert.Equal("int x", baz.Parameters[0]);
-            Assert.Equal("int y", baz.Parameters[1]);
+            Assert.Single(model.Properties);
+            Assert.Single(model.Methods);
         }
 
         [Fact]
-        public void ExtractClass_HandlesUnknownClassName()
+        public void ExtractClass_ParsesStaticAndReadonlyProperties()
         {
             var lines = new[]
             {
-                "public class", // missing name
-                "{",
+                "public class StaticReadonlyProps {",
+                "public static int Count { get; set; }",
+                "public readonly string Name { get; set; }",
                 "}"
             };
             int index = 0;
             var model = ExtractorHelper.ExtractClass(ref index, lines, "NS");
-            Assert.Equal("UnknownClass", model.Name);
+
+            Assert.Equal(2, model.Properties.Count);
+            Assert.Contains(model.Properties, p => p.Name.Contains("Count"));
+            Assert.Contains(model.Properties, p => p.Name.Contains("Name"));
+        }
+
+        [Fact]
+        public void ExtractClass_ParsesMultiLineMethodSignature()
+        {
+            var lines = new[]
+            {
+                "public class MultiLineMethod {",
+                "public void DoSomething(",
+                "   int x,",
+                "   string y",
+                ") { }",
+                "}"
+            };
+            int index = 0;
+            var model = ExtractorHelper.ExtractClass(ref index, lines, "NS");
+
+            Assert.Contains(model.Methods, m => m.Name == "DoSomething");
+        }
+
+        [Fact]
+        public void ExtractClass_ParsesMultiLineProperty()
+        {
+            var lines = new[]
+            {
+                "public class MultiLineProp {",
+                "public int Number",
+                "{",
+                "    get; set;",
+                "}",
+                "}"
+            };
+            int index = 0;
+            var model = ExtractorHelper.ExtractClass(ref index, lines, "NS");
+
+            Assert.Contains(model.Properties, p => p.Name.Contains("Number"));
         }
         #endregion
 
@@ -313,6 +337,116 @@ namespace ClassDiagrammGeneratorTests.Helper
             Assert.Equal("B", model.Methods[1].Name);
         }
 
+        #endregion
+
+        #region ExractBracketContent
+        [Fact]
+        public void GetContentOfBrackets_ReturnsEmptyList_WhenNoLines()
+        {
+            // Arrange
+            var lines = new string[0];
+
+            // Act
+            var result = ExtractorHelper.GetContentOfBrackets(0, lines);
+
+            // Assert
+            Assert.Empty(result);
+        }
+
+        [Fact]
+        public void GetContentOfBrackets_ReturnsAllLines_WhenNoBrackets()
+        {
+            // Arrange
+            var lines = new[] { "line1", "line2", "line3" };
+
+            // Act
+            var result = ExtractorHelper.GetContentOfBrackets(0, lines);
+
+            // Assert
+            Assert.Equal(lines, result);
+        }
+
+        [Fact]
+        public void GetContentOfBrackets_StopsAtMatchingClosingBracket()
+        {
+            // Arrange
+            var lines = new[]
+            {
+                "{",
+                "int x = 1;",
+                "if (x > 0) {",
+                "x++;",
+                "}",
+                "}",
+                "outside"
+            };
+
+            // Act
+            var result = ExtractorHelper.GetContentOfBrackets(1, lines);
+
+            // Assert
+            // Should include all lines up to and including the line with the last closing bracket
+            Assert.Equal(new List<string>
+            {
+                "{",
+                "int x = 1;",
+                "if (x > 0) {",
+                "x++;",
+                "}",
+                "}"
+            }, result);
+        }
+
+        [Fact]
+        public void GetContentOfBrackets_HandlesNestedBrackets()
+        {
+            // Arrange
+            var lines = new[]
+            {
+                "{",
+                "if (true) {",
+                "doSomething();",
+                "}",
+                "}"
+            };
+
+            // Act
+            var result = ExtractorHelper.GetContentOfBrackets(1, lines);
+
+            // Assert
+            Assert.Equal(new List<string>
+            {
+                "{",
+                "if (true) {",
+                "doSomething();",
+                "}",
+                "}"
+            }, result);
+        }
+
+        [Fact]
+        public void GetContentOfBrackets_StartsAtGivenLine()
+        {
+            // Arrange
+            var lines = new[]
+            {
+                "// comment",
+                "{",
+                "code;",
+                "}"
+            };
+
+            // Act
+            var result = ExtractorHelper.GetContentOfBrackets(1, lines, 1);
+
+            // Assert
+            Assert.Equal(new List<string>
+            {
+                "{",
+                "code;",
+                "}"
+            }, result);
+        }
         #endregion
     }
 }

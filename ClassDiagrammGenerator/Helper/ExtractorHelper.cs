@@ -2,11 +2,22 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 
 namespace ClassDiagrammGenerator.Helper
 {
     public class ExtractorHelper
     {
+        public static Regex SingleLineProperty = new(
+            @"^\s*(public|private|protected|internal|protected\s+internal|private\s+protected)?\s*(static\s+)?(readonly\s+)?[\w<>\[\],\s]+\s+\w+\s*\{\s*get;\s*set;\s*\}\s*(//.*)?$",
+            RegexOptions.Compiled);
+
+        public static Regex SingleLineMethod = new(
+            @"^\s*(public|private|protected|internal|protected\s+internal|private\s+protected)?\s*(static\s+)?(async\s+)?[\w<>\[\],\s]+\s+\w+\s*\([^\)]*\)\s*(\{.*\}|where|\=\>|;)?\s*(//.*)?$",
+            RegexOptions.Compiled);
+        public static Regex MultiLineMethod = new(@" ^\s*(public|private|protected|internal|protected\s+internal|private\s+protected)?\s*(static\s+)?(async\s+)?[\w<>\[\],\s]+\s+\w+\s*\([^\)]*\)\s*(\{|\=\>|where|\;)?$", RegexOptions.Compiled);
+        public static Regex MultiLineProperty = new(@"^\s*(public|private|protected|internal|protected\s+internal|private\s+protected)?\s*(static\s+)?(readonly\s+)?[\w<>\[\],\s]+\s+\w+\s*\{[\s\S]*?\}$", RegexOptions.Compiled | RegexOptions.Multiline);
+
         public static InterfaceModel ExtractInterface(ref int index, string[] lines, string currentNamespace)
         {
             string line = lines[index].Trim();
@@ -23,9 +34,7 @@ namespace ClassDiagrammGenerator.Helper
             string[] parts = line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
             int interfaceIndex = Array.IndexOf(parts, "interface");
             string interfaceName = (interfaceIndex >= 0 && interfaceIndex < parts.Length - 1) ? parts[interfaceIndex + 1] : "UnknownInterface";
-            // Create model
-            // Fix for CS1729: Modify the creation of InterfaceModel to use property initialization instead of a non-existent constructor.
-            // Fix for IDE0090: Simplify the 'new' expression by directly initializing properties.
+
 
             InterfaceModel interfaceModel = new InterfaceModel
             {
@@ -106,9 +115,14 @@ namespace ClassDiagrammGenerator.Helper
             int classIndex = Array.IndexOf(parts, "class");
             string className = (classIndex >= 0 && classIndex < parts.Length - 1) ? parts[classIndex + 1] : "UnknownClass";
 
+            ClassModel classModel = new ClassModel
+            {
+                Name = className,
+                Namespace = currentNamespace,
+                AccessModifier = accessModifier
+            };
+
             // Check for inheritance/interfaces (after ':')
-            List<string> baseClasses = new();
-            List<string> interfaces = new();
             int colonIndex = line.IndexOf(':');
             if (colonIndex != -1)
             {
@@ -116,22 +130,18 @@ namespace ClassDiagrammGenerator.Helper
                 var types = inheritancePart.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
                 foreach (var type in types)
                 {
+                    string cleanType = type.Replace("{", "").Trim();
                     // Simple heuristic: assume first is base class, rest are interfaces
-                    if (baseClasses.Count == 0)
-                        baseClasses.Add(type);
+                    if (type.StartsWith("I"))
+                    {
+                        classModel.Interfaces.Add(cleanType);
+                    }
                     else
-                        interfaces.Add(type);
+                    {
+                        classModel.BaseClasses.Add(cleanType);
+                    }
                 }
             }
-
-            ClassModel classModel = new ClassModel
-            {
-                Name = className,
-                Namespace = currentNamespace,
-                AccessModifier = accessModifier,
-                BaseClasses = baseClasses,
-                Interfaces = interfaces
-            };
 
             int openedBrackets = 0;
 
@@ -146,101 +156,87 @@ namespace ClassDiagrammGenerator.Helper
                 openedBrackets++;
                 index++;
             }
-            while (index < lines.Length && !(openedBrackets == 0))
+
+            List<string> classContent = GetContentOfBrackets(openedBrackets, lines, index);
+
+            string classContentStr = string.Join("\n", classContent);
+
+            foreach (Match match in SingleLineMethod.Matches(classContentStr))
             {
-                string memberLine = lines[index].Trim();
-
-                if (memberLine == "{")
+                string methodSignature = match.Value.Trim();
+                if (!string.IsNullOrEmpty(methodSignature))
                 {
-                    openedBrackets++;
+                    classModel.AddMethod(methodSignature);
                 }
-                if(memberLine == "}")
-                {
-                    openedBrackets--;
-                }
-
-
-                if (string.IsNullOrEmpty(memberLine) || memberLine.StartsWith("//") || memberLine == "{")
-                {
-                    
-                    index++;
-                    continue;
-                }
-
-                // Simple property detection: [access] [type] [name] { get; set; }
-                if (memberLine.Contains("{ get;") && memberLine.Contains("set; }"))
-                {
-                    // Example: public int MyProperty { get; set; }
-                    var tokens = memberLine.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
-                    int typeIndex = 0;
-                    EAccessmodifier propAccess = EAccessmodifier.Private;
-                    if (tokens[0] == "public") { propAccess = EAccessmodifier.Public; typeIndex = 1; }
-                    else if (tokens[0] == "private") { propAccess = EAccessmodifier.Private; typeIndex = 1; }
-                    else if (tokens[0] == "protected") { propAccess = EAccessmodifier.Protected; typeIndex = 1; }
-                    else if (tokens[0] == "internal") { propAccess = EAccessmodifier.Internal; typeIndex = 1; }
-
-                    bool isStatic = false;
-                    if (memberLine.Contains("static"))
-                    {
-                        isStatic = true;
-                        typeIndex++;
-                    }
-
-                    bool isReadonly = false;
-                    if (memberLine.Contains("readonly"))
-                    {
-                        isReadonly = true;
-                        typeIndex++;
-                    }
-
-                    string type = tokens[typeIndex];
-                    string name = tokens[typeIndex + 1];
-
-                    classModel.Properties.Add(new PropertyModel(name, type, propAccess, isReadonly, isStatic));
-                }
-
-                // Simple method detection: [access] [returnType] [name](...)
-                else if (memberLine.Contains("(") && memberLine.Contains(")") && memberLine.EndsWith("{"))
-                {
-                    // Example: public void MyMethod(int x) {
-                    var tokens = memberLine.Split(new[] { ' ', '\t', '(', ')' }, StringSplitOptions.RemoveEmptyEntries);
-                    int typeIndex = 0;
-                    EAccessmodifier methodAccess = EAccessmodifier.Private;
-                    if (tokens[0] == "public") { methodAccess = EAccessmodifier.Public; typeIndex = 1; }
-                    else if (tokens[0] == "private") { methodAccess = EAccessmodifier.Private; typeIndex = 1; }
-                    else if (tokens[0] == "protected") { methodAccess = EAccessmodifier.Protected; typeIndex = 1; }
-                    else if (tokens[0] == "internal") { methodAccess = EAccessmodifier.Internal; typeIndex = 1; }
-
-                    bool isStatic = false;
-                    if (tokens[typeIndex] == "static") { isStatic = true; typeIndex++; }
-
-                    bool isAsync = false;
-                    if (tokens[typeIndex] == "async") { isAsync = true; typeIndex++; }
-
-                    string returnType = tokens[typeIndex];
-                    string name = tokens[typeIndex + 1];
-
-                    // Parameters
-                    int parenStart = memberLine.IndexOf('(');
-                    int parenEnd = memberLine.IndexOf(')');
-                    string paramList = memberLine.Substring(parenStart + 1, parenEnd - parenStart - 1);
-                    var parameters = paramList.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-
-                    classModel.Methods.Add(new MethodModel
-                    {
-                        IsAsync = isAsync,
-                        IsStatic = isStatic,
-                        Name = name,
-                        ReturnType = returnType,
-                        Parameters = parameters.ToList(),
-                        AccessModifier = methodAccess
-                    });
-                }
-
-                index++;
             }
 
+            foreach (Match match in MultiLineMethod.Matches(classContentStr))
+            {
+                string methodSignature = match.Value.Trim();
+                if (!string.IsNullOrEmpty(methodSignature))
+                {
+                    classModel.AddMethod(methodSignature);
+                }
+            }
+
+            foreach (Match match in SingleLineProperty.Matches(classContentStr))
+            {
+                string propertySignature = match.Value.Trim();
+                if (!string.IsNullOrEmpty(propertySignature))
+                {
+                    classModel.Properties.Add(new PropertyModel(propertySignature, accessModifier));
+                }
+            }
+
+            foreach (Match match in MultiLineProperty.Matches(classContentStr))
+            {
+                string propertySignature = match.Value.Trim();
+                if (!string.IsNullOrEmpty(propertySignature))
+                {
+                    classModel.Properties.Add(new PropertyModel(propertySignature, accessModifier));
+                }
+            }
+
+
+
             return classModel;
+        }
+
+        public static List<string> GetContentOfBrackets(int bracketsCount, string[] lines, int startLine = 0)
+        {
+            List<string> content = new List<string>();
+            bool commentBlock = false;
+            for (int i = startLine; i < lines.Length; i++)
+            {
+                string line = lines[i].Trim();
+                if (line.StartsWith("/*"))
+                {
+                    commentBlock = true;
+                }
+                else if (line.EndsWith("*/"))
+                {
+                    commentBlock = false;
+                    continue; // skip this line
+                }
+                if (commentBlock || line.StartsWith("//") || string.IsNullOrWhiteSpace(line))
+                {
+                    continue; // skip comments and empty lines
+                }
+                if (line == "{")
+                {
+                    bracketsCount++;
+                }
+                else if (line == "}")
+                {
+                    bracketsCount--;
+                    if (bracketsCount == 0)
+                    {
+                        break;
+                    }
+                }
+                content.Add(line);
+            }
+            return content;
         }
     }
 }
