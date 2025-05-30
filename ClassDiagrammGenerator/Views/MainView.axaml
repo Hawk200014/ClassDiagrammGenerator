@@ -1,0 +1,60 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="clr-namespace:ClassDiagrammGenerator.ViewModels"
+             mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
+             x:Class="ClassDiagrammGenerator.Views.MainView"
+             x:DataType="vm:MainViewModel">
+  <Design.DataContext>
+    <!-- This only sets the DataContext for the previewer in an IDE,
+         to set the actual DataContext for runtime, set the DataContext property in code (look at App.axaml.cs) -->
+    <vm:MainViewModel />
+  </Design.DataContext>
+  <Panel>
+    <TabControl>
+      <TabItem Header="Generate">
+        <DockPanel>
+          <Grid DockPanel.Dock="Bottom">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="Auto"/>
+              <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+              <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <TextBox Grid.Column="0" Grid.Row="0" Text="{Binding RootPath}" Margin="5"/>
+            <Button Grid.Column="1" Grid.Row="0" Content="Select Folder" Command="{Binding FolderSelectCommand}" Margin="5"/>
+            <Button Grid.Column="2" Grid.Row="0" IsEnabled="{Binding GenerateEnabled}" Content="Generate"  Command="{Binding GenerateCommand}" Margin="5"/>
+          </Grid>
+          <Panel>
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
+              <TextBox Margin="5" Text="{Binding OutputText}" ></TextBox>
+            </ScrollViewer>
+          </Panel>
+        </DockPanel>
+      </TabItem>
+      <TabItem Header="Settings">
+        <Panel Margin="0,0,0,5">
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto"/>
+              <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+              <RowDefinition Height="Auto"/>
+              <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+            <HeaderedContentControl Header="Ignore">
+              <StackPanel Spacing="8">
+                <CheckBox IsChecked="{Binding UseGitIgnore}" FlowDirection="LeftToRight" Content="Use .gitignore" ToolTip.Tip="Ignores the files in generating the class diagramm"></CheckBox>
+              </StackPanel>
+            </HeaderedContentControl>
+          </Grid>
+        </Panel>
+      </TabItem>
+    </TabControl>
+  </Panel>
+</UserControl>
